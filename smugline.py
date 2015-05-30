@@ -2,30 +2,24 @@
 """smugline - command line tool for SmugMug
 
 Usage:
-  smugline.py upload <album_name> --api-key=<apy_key>
+  smugline.py upload <album_name> --api-key=<api_key>
+                                  [--oauth-secret=<oauth_secret>]
                                   [--from=folder_name]
                                   [--media=(videos | images | all)]
-                                  [--email=email_address]
-                                  [--password=password]
-  smugline.py download <album_name> --api-key=<apy_key>
+  smugline.py download <album_name> --api-key=<api_key>
+                                    [--oauth-secret=<oauth_secret>]
                                     [--to=folder_name]
                                     [--media=(videos | images | all)]
-                                    [--email=email_address]
-                                    [--password=password]
-  smugline.py process <json_file> --api-key=<apy_key>
+  smugline.py process <json_file> --api-key=<api_key>
+                                  [--oauth-secret=<oauth_secret>]
                                   [--from=folder_name]
-                                  [--email=email_address]
-                                  [--password=password]
-  smugline.py list --api-key=apy_key
-                   [--email=email_address]
-                   [--password=password]
-  smugline.py create <album_name> --api-key=apy_key
+  smugline.py list --api-key=api_key
+                   [--oauth-secret=oauth_secret]
+  smugline.py create <album_name> --api-key=api_key
+                                  [--oauth-secret=oauth_secret]
                                   [--privacy=(unlisted | public)]
-                                  [--email=email_address]
-                                  [--password=password]
-  smugline.py clear_duplicates <album_name> --api-key=<apy_key>
-                                            [--email=email_address]
-                                            [--password=password]
+  smugline.py clear_duplicates <album_name> --api-key=<api_key>
+                                            [--oauth-secret=<oauth_secret>]
   smugline.py (-h | --help)
 
 Arguments:
@@ -38,13 +32,13 @@ Arguments:
 
 Options:
   --api-key=api_key       your smugmug api key
+  --oauth-secret=oauth_secret
+                          your smugmug api oauth secret
   --from=folder_name      folder to upload from [default: .]
   --media=(videos | images | all)
                           upload videos, images, or both [default: images]
   --privacy=(unlisted | public)
                           album privacy settings [default: unlisted]
-  --email=email_address   email address of your smugmug account
-  --passwod=password      smugmug password
 
 """
 
@@ -54,6 +48,7 @@ from smugpy import SmugMug
 import getpass
 import hashlib
 import os
+import sys
 import re
 import json
 import requests
@@ -66,18 +61,94 @@ VIDEO_FILTER = re.compile(r'.+\.(mov|mp4|avi|mts)$', re.IGNORECASE)
 ALL_FILTER = re.compile('|'.join([IMG_FILTER.pattern, VIDEO_FILTER.pattern]),
                         re.IGNORECASE)
 
+#Aliasing for differences in Python 2.x and 3.x
+if sys.version_info < (3,):
+    get_input = raw_input
+else:
+    get_input = input
+
 
 class SmugLine(object):
-    def __init__(self, api_key, email=None, password=None):
-        self.api_key = api_key
-        self.email = email
-        self.password = password
-        self.smugmug = SmugMug(
-            api_key=api_key,
-            api_version="1.2.2",
-            app_name="SmugLine")
-        self.login()
+    def __init__(self, api_key, oauth_secret):
+        self.smugmug = self._login(api_key, oauth_secret, 'SmugLine')
         self.md5_sums = {}
+
+    def _login(self, api_key, oauth_secret, app_name):
+        # Step 1: get request token and authorization URL:
+        (url, requestToken) = self.smugmug_oauth_request_token(api_key, oauth_secret, app_name)
+
+        # Step 2: "visit" the authorization URL:
+        self.user_authorize_at_smugmug(url)
+
+        # Step 3: Upgrade the authorized request token into an access token
+        accessToken = self.smugmug_oauth_get_access_token(api_key, oauth_secret, app_name, requestToken)
+
+        # Step 3.5: You should save off the accessToken so you can resume at
+        # the following step from now on.  There is no need to jump through
+        # the request token and authorization URL more than once.
+
+        # Step 4 (and step 1 in the future): log in with the (saved) access
+        # token to get an authorized connection to smugmug.com:
+
+        smugmug = self.smugmug_oauth_use_access_token(api_key, oauth_secret, app_name, accessToken)
+
+        return smugmug
+
+    # Request a "request token" from the smugmug servers for the given permissions.
+    #
+    # Return a pair (url, requestToken) that can be used to authorize this app to
+    # access the account of whomever logs in at the URL.
+    def smugmug_oauth_request_token(self, api_key, oauth_secret, app_name, access="Public", perm="Read"):
+        smugmug = SmugMug(api_key=api_key, oauth_secret=oauth_secret, app_name=app_name)
+
+        # Get a token that is short-lived (probably about 5 minutes) and can be used
+        # only to setup authorization at SmugMug
+        response = smugmug.auth_getRequestToken()
+
+        # Get the URL that the user must visit to authorize this app (implicilty includes the request token in the URL)
+        url = smugmug.authorize(access=access, perm=perm)
+
+        return url, response['Auth'] # (should contain a 'Token')
+
+    # "Visit" the URL (well, print the instructions the user should use to visit
+    # the URL).  Once this is done the request token can be used to log in to
+    # that user's account and get an "access token" for this app to use that
+    # account.
+    #
+    # This implementation blocks until the user acknowledges that they've completed
+    # the authorization at smugmug.com
+    def user_authorize_at_smugmug(self, url):
+        get_input("Authorize app at %s\n\nPress Enter when complete.\n" % (url))
+
+    # Request an "access token" based on the given request token.  The request token
+    # should be authorized at smugmug.com.
+    #
+    # Return the "access token" that encodes the user's identity and the secrets
+    # that authorize this app to access that user's smugmug account.
+    def smugmug_oauth_get_access_token(self, api_key, oauth_secret, app_name, requestToken):
+        # Use the request token to log in (which should be authorized now)
+        smugmug = SmugMug(api_key=api_key, oauth_secret=oauth_secret,
+                          oauth_token=requestToken['Token']['id'],
+                          oauth_token_secret=requestToken['Token']['Secret'],
+                          app_name=app_name)
+
+        # The request token is good for 1 operation: to get an access token.
+        response = smugmug.auth_getAccessToken()
+
+        # The access token should be good until the user explicitly
+        # disables it at smugmug.com in their settings panel.
+        return response['Auth'];
+
+    # Log into smugmug.com with an authorized accessToken.  The accessToken includes
+    # the user's identity and, effectively, a password to get this application into
+    # the account.
+    def smugmug_oauth_use_access_token(self, api_key, oauth_secret, app_name, accessToken):
+        # Use the access token to log in
+        smugmug = SmugMug(api_key=api_key, oauth_secret=oauth_secret,
+                          oauth_token=accessToken['Token']['id'],
+                          oauth_token_secret=accessToken['Token']['Secret'],
+                          app_name=app_name)
+        return smugmug;
 
     def get_filter(self, media_type='images'):
         if media_type == 'videos':
@@ -193,7 +264,7 @@ class SmugLine(object):
         return [x for x in images if self._include_file(x.get('File'), md5_sums)]
 
     def get_albums(self):
-        albums = self.smugmug.albums_get(NickName=self.nickname)
+        albums = self.smugmug.albums_get()
         return albums
 
     def list_albums(self):
@@ -242,26 +313,6 @@ class SmugLine(object):
                 if img_filter.match(name))
         return matches
 
-    def _set_email_and_password(self):
-        # for python2
-        try:
-            input = raw_input
-        except NameError:
-            pass
-
-        if self.email is None:
-            self.email = input('Email address: ')
-        if self.password is None:
-            self.password = getpass.getpass()
-
-    def login(self):
-        self._set_email_and_password()
-        self.user_info = self.smugmug.login_withPassword(
-            EmailAddress=self.email,
-            Password=self.password)
-        self.nickname = self.user_info['Login']['User']['NickName']
-        return self.user_info
-
     def _delete_image(self, image):
         print('deleting image {0} (md5: {1})'.format(image['FileName'],
                                                     image['MD5Sum']))
@@ -281,8 +332,7 @@ if __name__ == '__main__':
     arguments = docopt(__doc__, version='SmugLine 0.4')
     smugline = SmugLine(
         arguments['--api-key'],
-        email=arguments['--email'],
-        password=arguments['--password'])
+        arguments['--oauth-secret'])
     if arguments['upload']:
         file_filter = smugline.get_filter(arguments['--media'])
         smugline.upload_folder(arguments['--from'],
