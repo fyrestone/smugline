@@ -43,15 +43,18 @@ Options:
 """
 
 # pylint: disable=print-statement
+# TODO: Solve duplicate album name problem.
+# Currently, process album by name only apply to the first one.
 from docopt import docopt
 from smugpy import SmugMug
-import getpass
 import hashlib
 import os
 import sys
 import re
 import json
+import pprint
 import requests
+import functools
 from itertools import groupby
 
 __version__ = '0.5.1'
@@ -61,11 +64,57 @@ VIDEO_FILTER = re.compile(r'.+\.(mov|mp4|avi|mts)$', re.IGNORECASE)
 ALL_FILTER = re.compile('|'.join([IMG_FILTER.pattern, VIDEO_FILTER.pattern]),
                         re.IGNORECASE)
 
-#Aliasing for differences in Python 2.x and 3.x
+# Aliasing for differences in Python 2.x and 3.x
 if sys.version_info < (3,):
     get_input = raw_input
 else:
     get_input = input
+
+
+def auto_retry(times=10):
+    """
+    An auto retry decorator, can be used as:
+
+    @auto_retry
+    def foo(param): pass
+
+    @auto_retry()
+    def foo(param): pass
+
+    @auto_retry(10)
+    def foo(param): pass
+
+    These usages are identical.
+
+    :param times: retry times
+    :return: decorated function
+    """
+    import inspect
+
+    args, varargs, keywords, defaults = inspect.getargspec(auto_retry)
+    default_dict = dict(zip(reversed(args), reversed(defaults)))
+
+    if callable(times):
+        wrapper_func = times
+        times = default_dict['times']
+    else:
+        wrapper_func = None
+
+    def wrapper(func):
+        @functools.wraps(func)
+        def inner_wrapper(*args, **kwargs):
+            last_ex = None
+            for i in xrange(0, times):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as ex:
+                    print('auto retry %s %d ...' % (func.__name__, i))
+                    last_ex = ex
+            raise Exception(last_ex)
+
+        return inner_wrapper
+
+    return wrapper(wrapper_func) if wrapper_func else wrapper
 
 
 class SmugLine(object):
@@ -75,22 +124,22 @@ class SmugLine(object):
 
     def _login(self, api_key, oauth_secret, app_name):
         # Step 1: get request token and authorization URL:
-        (url, requestToken) = self.smugmug_oauth_request_token(api_key, oauth_secret, app_name)
+        (url, request_token) = self.smugmug_oauth_request_token(api_key, oauth_secret, app_name, 'Full', 'Modify')
 
         # Step 2: "visit" the authorization URL:
         self.user_authorize_at_smugmug(url)
 
         # Step 3: Upgrade the authorized request token into an access token
-        accessToken = self.smugmug_oauth_get_access_token(api_key, oauth_secret, app_name, requestToken)
+        access_token = self.smugmug_oauth_get_access_token(api_key, oauth_secret, app_name, request_token)
 
-        # Step 3.5: You should save off the accessToken so you can resume at
+        # Step 3.5: You should save off the access_token so you can resume at
         # the following step from now on.  There is no need to jump through
         # the request token and authorization URL more than once.
 
         # Step 4 (and step 1 in the future): log in with the (saved) access
         # token to get an authorized connection to smugmug.com:
 
-        smugmug = self.smugmug_oauth_use_access_token(api_key, oauth_secret, app_name, accessToken)
+        smugmug = self.smugmug_oauth_use_access_token(api_key, oauth_secret, app_name, access_token)
 
         return smugmug
 
@@ -98,7 +147,9 @@ class SmugLine(object):
     #
     # Return a pair (url, requestToken) that can be used to authorize this app to
     # access the account of whomever logs in at the URL.
-    def smugmug_oauth_request_token(self, api_key, oauth_secret, app_name, access="Public", perm="Read"):
+    @staticmethod
+    @auto_retry
+    def smugmug_oauth_request_token(api_key, oauth_secret, app_name, access="Public", perm="Read"):
         smugmug = SmugMug(api_key=api_key, oauth_secret=oauth_secret, app_name=app_name)
 
         # Get a token that is short-lived (probably about 5 minutes) and can be used
@@ -108,7 +159,7 @@ class SmugLine(object):
         # Get the URL that the user must visit to authorize this app (implicilty includes the request token in the URL)
         url = smugmug.authorize(access=access, perm=perm)
 
-        return url, response['Auth'] # (should contain a 'Token')
+        return url, response['Auth']  # (should contain a 'Token')
 
     # "Visit" the URL (well, print the instructions the user should use to visit
     # the URL).  Once this is done the request token can be used to log in to
@@ -117,19 +168,22 @@ class SmugLine(object):
     #
     # This implementation blocks until the user acknowledges that they've completed
     # the authorization at smugmug.com
-    def user_authorize_at_smugmug(self, url):
-        get_input("Authorize app at %s\n\nPress Enter when complete.\n" % (url))
+    @staticmethod
+    def user_authorize_at_smugmug(url):
+        get_input("Please authorize app at %s\n\nPress Enter when complete.\n" % url)
 
     # Request an "access token" based on the given request token.  The request token
     # should be authorized at smugmug.com.
     #
     # Return the "access token" that encodes the user's identity and the secrets
     # that authorize this app to access that user's smugmug account.
-    def smugmug_oauth_get_access_token(self, api_key, oauth_secret, app_name, requestToken):
+    @staticmethod
+    @auto_retry
+    def smugmug_oauth_get_access_token(api_key, oauth_secret, app_name, request_token):
         # Use the request token to log in (which should be authorized now)
         smugmug = SmugMug(api_key=api_key, oauth_secret=oauth_secret,
-                          oauth_token=requestToken['Token']['id'],
-                          oauth_token_secret=requestToken['Token']['Secret'],
+                          oauth_token=request_token['Token']['id'],
+                          oauth_token_secret=request_token['Token']['Secret'],
                           app_name=app_name)
 
         # The request token is good for 1 operation: to get an access token.
@@ -137,20 +191,22 @@ class SmugLine(object):
 
         # The access token should be good until the user explicitly
         # disables it at smugmug.com in their settings panel.
-        return response['Auth'];
+        return response['Auth']
 
     # Log into smugmug.com with an authorized accessToken.  The accessToken includes
     # the user's identity and, effectively, a password to get this application into
     # the account.
-    def smugmug_oauth_use_access_token(self, api_key, oauth_secret, app_name, accessToken):
+    @staticmethod
+    def smugmug_oauth_use_access_token(api_key, oauth_secret, app_name, access_token):
         # Use the access token to log in
         smugmug = SmugMug(api_key=api_key, oauth_secret=oauth_secret,
-                          oauth_token=accessToken['Token']['id'],
-                          oauth_token_secret=accessToken['Token']['Secret'],
+                          oauth_token=access_token['Token']['id'],
+                          oauth_token_secret=access_token['Token']['Secret'],
                           app_name=app_name)
-        return smugmug;
+        return smugmug
 
-    def get_filter(self, media_type='images'):
+    @staticmethod
+    def get_filter(media_type='images'):
         if media_type == 'videos':
             return VIDEO_FILTER
         if media_type == 'images':
@@ -162,7 +218,8 @@ class SmugLine(object):
         self.smugmug.images_upload(AlbumID=album['id'], **image)
 
     # source: http://stackoverflow.com/a/16696317/305019
-    def download_file(self, url, folder, filename=None):
+    @staticmethod
+    def download_file(url, folder, filename=None):
         local_filename = os.path.join(folder, filename or url.split('/')[-1])
         if os.path.exists(local_filename):
             print('{0} already exists...skipping'.format(local_filename))
@@ -170,7 +227,7 @@ class SmugLine(object):
         r = requests.get(url, stream=True)
         with open(local_filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024):
-                if chunk: # filter out keep-alive new chunks
+                if chunk:  # filter out keep-alive new chunks
                     f.write(chunk)
                     f.flush()
         return local_filename
@@ -217,6 +274,7 @@ class SmugLine(object):
             print('downloading {0} -> {1}'.format(img['FileName'], dest_folder))
             self.download_file(img['OriginalURL'], dest_folder, img['FileName'])
 
+    @auto_retry
     def _get_remote_images(self, album, extras=None):
         remote_images = self.smugmug.images_get(
             AlbumID=album['id'],
@@ -234,11 +292,11 @@ class SmugLine(object):
         extras = 'FileName,OriginalURL'
         images = self._get_remote_images(album, extras)['Album']['Images']
 
-        for image in [img for img in images \
-                    if file_filter.match(img['FileName'])]:
+        for image in [img for img in images if file_filter.match(img['FileName'])]:
             yield image
 
-    def _file_md5(self, filename, block_size=2**20):
+    @staticmethod
+    def _file_md5(filename, block_size=2**20):
         md5 = hashlib.md5()
         f = open(filename, 'rb')
         while True:
@@ -270,8 +328,7 @@ class SmugLine(object):
     def list_albums(self):
         print('available albums:')
         for album in self.get_albums()['Albums']:
-            if album['Title']:
-                print(album['Title'])
+            pprint.pprint(album)
 
     def get_or_create_album(self, album_name):
         album = self.get_album_by_name(album_name)
@@ -282,13 +339,14 @@ class SmugLine(object):
     def get_album_by_name(self, album_name):
         albums = self.get_albums()
         try:
-            matches = [x for x in albums['Albums'] \
+            matches = [x for x in albums['Albums']
                        if x.get('Title').lower() == album_name.lower()]
             return matches[0]
         except:
             return None
 
-    def _format_album_name(self, album_name):
+    @staticmethod
+    def _format_album_name(album_name):
         return album_name[0].upper() + album_name[1:]
 
     def get_album_info(self, album):
@@ -305,27 +363,40 @@ class SmugLine(object):
             album_info['Album']['URL']))
         return album_info['Album']
 
-    def get_images_from_folder(self, folder, img_filter=IMG_FILTER):
+    @staticmethod
+    def get_images_from_folder(folder, img_filter=IMG_FILTER):
         matches = []
         for root, dirnames, filenames in os.walk(folder):
             matches.extend(
-                {'File': os.path.join(root, name)} for name in filenames \
+                {'File': os.path.join(root, name)} for name in filenames
                 if img_filter.match(name))
         return matches
 
+    @auto_retry
     def _delete_image(self, image):
-        print('deleting image {0} (md5: {1})'.format(image['FileName'],
-                                                    image['MD5Sum']))
+        # image filename may contains non ascii character, format will cause traceback.
+        # repr(filename) only contains ascii character, format will be ok.
+        print('deleting image {0} (md5: {1})'.format(repr(image['FileName']),
+                                                     image['MD5Sum']))
         self.smugmug.images_delete(ImageID=image['id'])
 
     def clear_duplicates(self, album_name):
         album = self.get_album_by_name(album_name)
         remote_images = self._get_remote_images(album, 'MD5Sum,FileName')
-        md5_sums = []
+        md5_sums = set()
         for image in remote_images['Album']['Images']:
             if image['MD5Sum'] in md5_sums:
                 self._delete_image(image)
-            md5_sums.append(image['MD5Sum'])
+            md5_sums.add(image['MD5Sum'])
+
+    def clear_duplicates_by_album(self, album):
+        remote_images = self._get_remote_images(album, 'Size,MD5Sum,FileName')
+        md5_sums = set()
+        for image in remote_images['Album']['Images']:
+            if image['MD5Sum'] in md5_sums:
+                pprint.pprint(image)
+                self._delete_image(image)
+            md5_sums.add(image['MD5Sum'])
 
 
 if __name__ == '__main__':
@@ -336,16 +407,16 @@ if __name__ == '__main__':
     if arguments['upload']:
         file_filter = smugline.get_filter(arguments['--media'])
         smugline.upload_folder(arguments['--from'],
-                        arguments['<album_name>'],
-                        file_filter)
+                               arguments['<album_name>'],
+                               file_filter)
     if arguments['download']:
         file_filter = smugline.get_filter(arguments['--media'])
         smugline.download_album(arguments['<album_name>'],
-                        arguments['--to'],
-                        file_filter)
+                                arguments['--to'],
+                                file_filter)
     if arguments['process']:
         smugline.upload_json(arguments['--from'],
-                        arguments['<json_file>'])
+                             arguments['<json_file>'])
     if arguments['list']:
         smugline.list_albums()
     if arguments['create']:
