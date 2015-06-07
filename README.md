@@ -30,31 +30,27 @@ print usage info
 ```shell
 $ python smugline.py -h
 
+smugline - command line tool for SmugMug
+
 Usage:
-  smugline.py upload <album_name> --api-key=<apy_key>
+  smugline.py upload <album_name> --api-key=<api_key>
+                                  [--oauth-secret=<oauth_secret>]
                                   [--from=folder_name]
                                   [--media=(videos | images | all)]
-                                  [--email=email_address]
-                                  [--password=password]
-  smugline.py download <album_name> --api-key=<apy_key>
+  smugline.py download <album_name> --api-key=<api_key>
+                                    [--oauth-secret=<oauth_secret>]
                                     [--to=folder_name]
                                     [--media=(videos | images | all)]
-                                    [--email=email_address]
-                                    [--password=password]
-  smugline.py process <json_file> --api-key=<apy_key>
+  smugline.py process <json_file> --api-key=<api_key>
+                                  [--oauth-secret=<oauth_secret>]
                                   [--from=folder_name]
-                                  [--email=email_address]
-                                  [--password=password]
-  smugline.py list --api-key=apy_key
-                   [--email=email_address]
-                   [--password=password]
-  smugline.py create <album_name> --api-key=apy_key
+  smugline.py list --api-key=api_key
+                   [--oauth-secret=oauth_secret]
+  smugline.py create <album_name> --api-key=api_key
+                                  [--oauth-secret=oauth_secret]
                                   [--privacy=(unlisted | public)]
-                                  [--email=email_address]
-                                  [--password=password]
-  smugline.py clear_duplicates <album_name> --api-key=<apy_key>
-                                            [--email=email_address]
-                                            [--password=password]
+  smugline.py clear_duplicates <album_name> --api-key=<api_key>
+                                            [--oauth-secret=<oauth_secret>]
   smugline.py (-h | --help)
 
 Arguments:
@@ -67,13 +63,13 @@ Arguments:
 
 Options:
   --api-key=api_key       your smugmug api key
+  --oauth-secret=oauth_secret
+                          your smugmug api oauth secret
   --from=folder_name      folder to upload from [default: .]
   --media=(videos | images | all)
                           upload videos, images, or both [default: images]
   --privacy=(unlisted | public)
                           album privacy settings [default: unlisted]
-  --email=email_address   email address of your smugmug account
-  --passwod=password      smugmug password
 ```
 
 list albums
@@ -90,7 +86,7 @@ Sample Gallery
 upload from current folder to 'My Album'
 
 ```shell
-$ ./smugline.py upload 'My Album' --api-key=... --email=your@email.com --password=yourpassword
+$ ./smugline.py upload 'My Album' --api-key=... --oauth-secret=...
 uploading ./IMG_123.jpg -> My Album
 uploading ./IMG_124.jpg -> My Album
 ...
@@ -100,7 +96,7 @@ uploading ./IMG_999.jpg -> My Album
 uploading again, this time specifying a source folder
 
 ```shell
-$ ./smugline.py upload 'My Album' --folder=/my_pics/ --api-key=... --email=your@email.com --password=yourpassword
+$ ./smugline.py upload 'My Album' --folder=/my_pics/ --api-key=... --oauth-secret=...
 skipping image /my_pics/IMG_123.jpg (duplicate)
 skipping image /my_pics/IMG_124.jpg (duplicate)
 ...
@@ -109,7 +105,7 @@ skipping image /my_pics/IMG_124.jpg (duplicate)
 uploading files described in a json file
 
 ```shell
-$ ./smugline.py process images.json --folder=/my_pics/ --api-key=... --email=your@email.com --password=yourpassword
+$ ./smugline.py process images.json --folder=/my_pics/ --api-key=... --oauth-secret=...
 ```
 
 where images.json (utf8 encoding) contain
@@ -130,7 +126,7 @@ where images.json (utf8 encoding) contain
 download to /tmp/ folder from 'My Album'
 
 ```shell
-$ ./smugline.py download 'My Album' --to=/tmp/ --api-key=... --email=your@email.com --password=yourpassword
+$ ./smugline.py download 'My Album' --to=/tmp/ --api-key=... --oauth-secret=...
 downloading IMG_123.jpg -> /tmp/
 downloading IMG_124.jpg -> /tmp/
 ...
@@ -140,13 +136,13 @@ downloading IMG_999.jpg -> /tmp/
 creating a new album (will create under 'Other' category)
 
 ```shell
-$ ./smugline.py create 'New Album' --api-key=... --email=your@email.com --password=yourpassword
+$ ./smugline.py create 'New Album' --api-key=... --oauth-secret=...
 unlisted album New Album created. URL: http://<your smugmug nickname>.smugmug.com/Other/New-Album/n-vH4ZF
 ```
 
 uploading videos only
 ```shell
-$ ./smugline.py upload 'My Album' --api-key=... --email=your@email.com --password=yourpassword --media=videos
+$ ./smugline.py upload 'My Album' --api-key=... --oauth-secret=... --media=videos
 uploading ./MOV_123.MOV -> My Album
 uploading ./MOV_124.mp4 -> My Album
 ...
@@ -155,7 +151,7 @@ uploading ./MOV_999.avi -> My Album
 
 clearing duplicate images or videos in 'My Album'
 ```shell
-$ ./smugline.py clear_duplicates 'My Album' --api-key=... --email=your@email.com --password=yourpassword
+$ ./smugline.py clear_duplicates 'My Album' --api-key=... --oauth-secret=...
 deleting image IMG_1234.JPG (md5: d429a9d0bf0829082985cb6941f6a547)
 ...
 ```
