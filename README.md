@@ -12,7 +12,7 @@ Written in python 2.x/3.x
 
 You must have a smugmug account and [apply for an API key](http://www.smugmug.com/hack/apikeys).
 Once you apply, the API key will be visible on your account settings -> Discovery -> API keys.
-You only need the `Key` (no need for the `Secret`).
+You need the `Key` and the `Secret`.
 
 ## Features
 
@@ -75,7 +75,7 @@ Options:
 list albums
 
 ```shell
-$ ./smugline.py list --api-key=... --email=your@email.com
+$ ./smugline.py list --api-key=... --oauth-secret=...
 Password:
 available albums:
 My Album
