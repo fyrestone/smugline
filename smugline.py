@@ -3,23 +3,23 @@
 
 Usage:
   smugline.py upload <album_name> --api-key=<api_key>
-                                  [--oauth-secret=<oauth_secret>]
+                                  --oauth-secret=<oauth_secret>
                                   [--from=folder_name]
                                   [--media=(videos | images | all)]
   smugline.py download <album_name> --api-key=<api_key>
-                                    [--oauth-secret=<oauth_secret>]
+                                    --oauth-secret=<oauth_secret>
                                     [--to=folder_name]
                                     [--media=(videos | images | all)]
   smugline.py process <json_file> --api-key=<api_key>
-                                  [--oauth-secret=<oauth_secret>]
+                                  --oauth-secret=<oauth_secret>
                                   [--from=folder_name]
   smugline.py list --api-key=api_key
-                   [--oauth-secret=oauth_secret]
+                   --oauth-secret=oauth_secret
   smugline.py create <album_name> --api-key=api_key
-                                  [--oauth-secret=oauth_secret]
+                                  --oauth-secret=oauth_secret
                                   [--privacy=(unlisted | public)]
   smugline.py clear_duplicates <album_name> --api-key=<api_key>
-                                            [--oauth-secret=<oauth_secret>]
+                                            --oauth-secret=<oauth_secret>
   smugline.py (-h | --help)
 
 Arguments:
@@ -103,14 +103,13 @@ def auto_retry(times=10):
     def wrapper(func):
         @functools.wraps(func)
         def inner_wrapper(*args, **kwargs):
-            last_ex = None
-            for i in xrange(0, times):
+            for i in xrange(0, times - 1):
                 try:
                     return func(*args, **kwargs)
                 except Exception as ex:
-                    print('auto retry %s %d ...' % (func.__name__, i))
-                    last_ex = ex
-            raise Exception(last_ex)
+                    print('auto retry %s %d ...' % (func.__name__, i + 1))
+            else:
+                return func(*args, **kwargs)
 
         return inner_wrapper
 
@@ -376,27 +375,19 @@ class SmugLine(object):
     def _delete_image(self, image):
         # image filename may contains non ascii character, format will cause traceback.
         # repr(filename) only contains ascii character, format will be ok.
-        print('deleting image {0} (md5: {1})'.format(repr(image['FileName']),
-                                                     image['MD5Sum']))
+        print('deleting image {0}'.format(repr(image['FileName'])))
         self.smugmug.images_delete(ImageID=image['id'])
 
     def clear_duplicates(self, album_name):
+        # clear duplicates by filename, same behavior as Smugmug's "skip duplicates".
+        # P.S. MD5Sum field is not available now.
         album = self.get_album_by_name(album_name)
-        remote_images = self._get_remote_images(album, 'MD5Sum,FileName')
+        remote_images = self._get_remote_images(album, 'FileName')
         md5_sums = set()
         for image in remote_images['Album']['Images']:
-            if image['MD5Sum'] in md5_sums:
+            if image['FileName'] in md5_sums:
                 self._delete_image(image)
-            md5_sums.add(image['MD5Sum'])
-
-    def clear_duplicates_by_album(self, album):
-        remote_images = self._get_remote_images(album, 'Size,MD5Sum,FileName')
-        md5_sums = set()
-        for image in remote_images['Album']['Images']:
-            if image['MD5Sum'] in md5_sums:
-                pprint.pprint(image)
-                self._delete_image(image)
-            md5_sums.add(image['MD5Sum'])
+            md5_sums.add(image['FileName'])
 
 
 if __name__ == '__main__':
