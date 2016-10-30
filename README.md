@@ -34,23 +34,23 @@ smugline - command line tool for SmugMug
 
 Usage:
   smugline.py upload <album_name> --api-key=<api_key>
-                                  [--oauth-secret=<oauth_secret>]
+                                  --oauth-secret=<oauth_secret>
                                   [--from=folder_name]
                                   [--media=(videos | images | all)]
   smugline.py download <album_name> --api-key=<api_key>
-                                    [--oauth-secret=<oauth_secret>]
+                                    --oauth-secret=<oauth_secret>
                                     [--to=folder_name]
                                     [--media=(videos | images | all)]
   smugline.py process <json_file> --api-key=<api_key>
-                                  [--oauth-secret=<oauth_secret>]
+                                  --oauth-secret=<oauth_secret>
                                   [--from=folder_name]
   smugline.py list --api-key=api_key
-                   [--oauth-secret=oauth_secret]
+                   --oauth-secret=oauth_secret
   smugline.py create <album_name> --api-key=api_key
-                                  [--oauth-secret=oauth_secret]
+                                  --oauth-secret=oauth_secret
                                   [--privacy=(unlisted | public)]
   smugline.py clear_duplicates <album_name> --api-key=<api_key>
-                                            [--oauth-secret=<oauth_secret>]
+                                            --oauth-secret=<oauth_secret>
   smugline.py (-h | --help)
 
 Arguments:
